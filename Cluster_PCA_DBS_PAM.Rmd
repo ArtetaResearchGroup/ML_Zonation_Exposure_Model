@@ -1,0 +1,441 @@
+---
+title: "Cluster_PCA_DBS_PAM"
+output: html_document
+date: "2024-01-15"
+editor_options: 
+  chunk_output_type: console
+---
+```{r}
+if(!require(dplyr)) install.packages('dplyr')
+library(dplyr)
+if(!require(ggpubr)) install.packages('ggpubr')
+library(ggpubr)
+if(!require(cluster)) install.packages('cluster')
+library(cluster)
+if(!require(NbClust)) install.packages('NbClust')
+library(NbClust)
+if(!require(factoextra)) install.packages('factoextra')
+library(factoextra)
+if(!require(clusterSim)) install.packages('clusterSim')
+library(clusterSim)
+if(!require(fpc)) install.packages('fpc')
+library(fpc)
+if(!require(openxlsx)) install.packages('openxlsx')
+library(openxlsx)
+if(!require(missForest)) install.packages('missForest')
+library(missForest)
+if(!require(skimr)) install.packages('skimr')
+library(skimr)
+if(!require(ggplot2)) install.packages('ggplot2')
+library(ggplot2)
+if(!require(caret)) install.packages('caret')
+library(caret)
+if(!require(geometry)) install.packages('geometry')
+library(geometry)
+if(!require(sf)) install.packages('sf')
+library(sf)
+if(!require(spgwr)) install.packages('spgwr')
+library(spgwr)
+#if(!require(rgdal)) install.packages('rgdal')
+#library(rgdal)
+#if(!require(rgeos)) install.packages('rgeos')
+#library(rgeos)
+if(!require(tmap)) install.packages('tmap')
+library(tmap)
+if(!require(paran)) install.packages('paran')
+library(paran)
+if(!require(scatterplot3d)) install.packages('scatterplot3d')
+library(scatterplot3d)
+if(!require(explor)) install.packages('explor')
+library(explor)
+if(!require(diceR)) install.packages('diceR')
+library(diceR)
+```
+
+Conjunto de clases por tipo de BD:
+```{r}
+#classes <- c("character","double","double","double","double") #NP_ESTRATO #NP_PISO
+#classes <- c("character","double","double","double","double","double","double") #6P
+#classes <- c("character","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double") #NP_ESTRATOPISO
+#classes <- c("character","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double") #NP_ESTRATOPISO_PROM
+classes <- c("character","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double") #6P_ESTRATOPISO_PROM
+#classes <- c("character","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double") #6P_ESTRATOPISO
+#classes <- c("character","double","double","double","double","double","double","double","double","double","double","double","double","double","double") #6P_ESTRATO_PISO
+
+#classes_4P_ESTRATOVIV_PROM <- c("character","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double")
+#classes_4P_ESTRATOPISO_PROM <- c("character","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double")
+```
+
+Lectura de datos:
+```{r}
+fold <- "C:/Users/julir/OneDrive - Universidad del Norte/++Uninorte/Tesis/++Finales/+Barranquilla"
+setwd(fold)
+datos <- read.csv("BD_6P_10K_ESTRATOPISO_PROM.csv",header=TRUE, sep=";", colClasses = classes, na = '#N/A') #Actualizar nombre archivo
+
+cod_dane <- datos$cod_dane
+datos <- datos %>% dplyr::select(!(cod_dane))
+points <- length(grep(x = colnames(datos), pattern = "_norm"))
+
+
+grafico <- "estratopiso_prom_6P_doc" #Actualizar
+name_grafico <- sprintf("%s/Graficos_%s", fold, grafico)
+
+if (!dir.exists(name_grafico)){
+  dir.create(name_grafico)
+}else{
+  print("dir exists")
+}
+```
+
+
+Definición de funciones:
+```{r}
+#PCA (grafica y puntos en nuevas dimensiones y %varianza explicada por valores propios)
+fun_pca <- function(datos, name_grafico, nvariables){
+  set.seed(123)
+  res_pca <- prcomp(datos,scale. = FALSE)
+  summary <- summary(res_pca)
+  pca_points <- res_pca$x
+  loadings <- res_pca$rotation
+  
+  screeplot(res_pca, las = 1, col = 4, space = 0.05, border = 4, main = '')
+  mtext('Number of Principal Components', side = 1, line = 2)
+  
+  var_explained <- res_pca$sdev^2/sum(res_pca$sdev^2)
+  plot(c(1:nvariables), var_explained, type = "b", main = "Scree Plot", xlab = "Principal Component", ylab = "Variance Explained", family="serif")
+  
+  new_dim <- fviz_pca_ind(res_pca, label = "none", 
+             addEllipses = FALSE, 
+             ellipse.level = 0.95,
+             palette = "Dark2",
+             ggtheme = theme_minimal(),
+             pointsize = 0.2)
+ 
+ setwd(name_grafico)
+ name_pca <- sprintf("PCA - %sP.png", points)
+ png(name_pca)
+ plot(new_dim)
+ dev.off()
+
+ list<- list(summary,new_dim, pca_points, loadings,var_explained)
+ return(list)
+}
+
+#Agrupamiento con k medoides y metricas (Silhouette, davies-bouldin, calinski-harabasz)
+pam_fun_k<-function(mds_points, k, cod_dane, cod, points, name_grafico){
+  set.seed(123)
+  pam <- pam(mds_points, k)
+  clust <- pam$clustering
+  sil_i <- pam$silinfo$widths
+  sil_t <- pam$silinfo$avg.width
+  sil_c <- pam$silinfo$clus.avg.widths
+  
+  table <- data.frame(cod_dane,clust)
+  DB <- index.DB(mds_points, clust)$DB
+  CH <- calinhara(mds_points, clust, cn=max(clust))
+  
+  print <- print(sprintf("Para nclust = %i, sil = %.3f, DB = %.3f y CH = %.0f", k, sil_t, DB, CH))
+  
+  viz <- fviz_cluster(list(data = mds_points, cluster = clust), geom = "point") +
+  theme_minimal()+ labs(subtitle = "via PAM")
+  
+  setwd(name_grafico)
+  name_pam <- sprintf("PAM - ZP%s - %sP - K%s.png", cod, points, k)
+  png(name_pam)
+  plot(viz)
+  dev.off()
+  
+  list <- list(viz, table, print)
+  return(list)
+}
+
+#Imputación de datos de valores faltantes usando Random Forest
+fun_missing <- function(datos){
+  set.seed(123)
+  s1<-skim(datos)
+  table1 <- data.frame(s1$skim_variable, s1$n_missing, s1$numeric.mean)
+  colnames(table1)<- c("Variable", "N missing - B", "Mean - B")
+  m<-missForest(datos)
+  datos <- m$ximp
+  s2<-skim(datos)
+  table2 <- data.frame(s2$skim_variable,s2$n_missing, s2$numeric.mean)
+  colnames(table2)<- c("Variable","N missing - A", "Mean - A")
+  tablet <- merge(table1, table2)
+  list <- list(tablet, datos)
+  return(list)
+}
+
+#Número de grupos con mejor calinski-harabasz con algoritmo PAM
+pam_fun_ch <- function(mds_points, com, points, name_grafico) {
+  mds_points <- data.frame(mds_points)
+  set.seed(123)
+  ch <- c()
+  for (i in 2:20) {
+    set.seed(123)
+    pam <- pam(mds_points, i) # perform clustering
+    ch[i] <- calinhara(mds_points, # data
+                       pam$clustering, # cluster assignments
+                       cn=max(pam$clustering) # total cluster number
+                       )
+  }
+  ch <-ch[2:20]
+  k <- 2:20
+  
+  data <- data.frame(k, ch)
+  chviz<- data %>%
+    tail(10) %>%
+    ggplot( aes(x=k, y=ch)) +
+    geom_line(color="dodgerblue1") +
+    geom_point(color="dodgerblue1") +
+    labs(x="Cluster number k", y ="Caliński - Harabasz Score",
+         title="Caliński - Harabasz Plot") + 
+    geom_vline(xintercept = which(ch==max(ch)) + 1,linetype="dashed") + 
+    theme_classic()
+  
+  setwd(name_grafico)
+  name_ch <- sprintf("CH - %s - %sP.png", com, points)
+  png(name_ch)
+  plot(chviz)
+  dev.off()
+  
+  list <- list(chviz, data)
+  return(list)
+}
+
+#Número de grupos con mejor davies-bouldin con algoritmo PAM
+pam_fun_db <- function(mds_points, com, points, name_grafico) {
+  mds_points <- data.frame(mds_points)
+  set.seed(123)
+  db <- c()
+  for (i in 2:20) {
+    set.seed(123)
+    pam <- pam(mds_points, i) # perform clustering
+    db[i] <- index.DB(mds_points, pam$clustering)$DB
+  }
+  db <-db[2:20]
+  k <- 2:20
+  
+  data <- data.frame(k, db)
+  dbviz<- data %>%
+    tail(10) %>%
+    ggplot( aes(x=k, y=db)) +
+    geom_line(color="dodgerblue1") +
+    geom_point(color="dodgerblue1") +
+    labs(x="Cluster number k", y ="Davies-Bouldin Score",
+         title="Davies-Bouldin Plot") + 
+    geom_vline(xintercept = which(db==min(db)) + 1,linetype="dashed") + 
+    theme_classic()
+  
+  setwd(name_grafico)
+  name_db <- sprintf("DB - %s - %sP.png", com, points)
+  png(name_db)
+  plot(dbviz)
+  dev.off()
+  
+  list <- list(dbviz, data)
+  return(list)
+}
+
+#Número de grupos con mejor Silhouette con algoritmo PAM
+pam_fun_sil<-function(mds_points, com, points, name_grafico){
+  set.seed(123)
+  fviz <- fviz_nbclust(mds_points, cluster::pam, method ="silhouette", k.max = 20)
+  setwd(name_grafico)
+  name_sil <- sprintf("SIL - %s - %sP.png", com, points)
+  png(name_sil)
+  plot(fviz)
+  dev.off()
+  nbclust<-fviz$data
+  list<- list(fviz,nbclust)
+  return(list)
+}
+
+```
+
+```{r}
+datos_f<-datos
+nvariables <- ncol(datos)
+res<-fun_pca(datos_f, name_grafico,nvariables)
+res[[2]]
+res[[5]]
+```
+
+```{r}
+paran(datos_f, iterations = 5000, centile = 95)
+```
+
+```{r}
+scatterplot3d(as.data.frame(res[[3]][,c(1,2,3)]), cex.symbols = 0.2,
+              xlab = sprintf("PC1 (%0.1f%%)",res[[5]][1]*100),
+              ylab = sprintf("PC2 (%0.1f%%)",res[[5]][2]*100),
+              zlab = sprintf("PC3 (%0.1f%%)",res[[5]][3]*100))
+
+```
+
+```{r}
+plot(as.data.frame(res[[3]][,c(1,2)]),
+     cex = 0.2, 
+     ylab = sprintf("PC2 (%0.1f%%)",res[[5]][2]*100),
+     xlab = sprintf("PC1 (%0.1f%%)",res[[5]][1]*100))
+```
+
+
+```{r}
+explor(res_pca)
+```
+
+
+```{r}
+loadings <- data.frame(res[[4]])
+len <- ncol(loadings)
+ind <- nrow(loadings)
+
+for (i in 1:len){
+  for (j in 1:ind){
+    if (loadings[j,i] > -4.5e-01 & loadings[j,i] < 4.5e-01){
+      loadings[j,i] <- 0
+    }
+  }
+}
+
+setwd("C:/Users/julir/OneDrive - Universidad del Norte/++Uninorte/Tesis/Borradores_PCA")
+write.xlsx(loadings,"LOADINGS_PCA_6P_PISO_VIV_PARED.xlsx", colnames = TRUE, rowNames = TRUE)
+```
+
+```{r}
+pca_rotated<-varimax(res[[4]][,c(1,2,3,4,5,6,7,8)]) #El numero de PC las elijo de acuerdo a la grafica de varianza explicada por cada PC
+print(pca_rotated)
+```
+
+
+```{r}
+r_pca<- data.frame(pca_rotated$loadings[,c(1,2,3,4,5,6,7)]) #Actualizar por el mismo numero de arriba
+len <- ncol(r_pca)
+ind <- nrow(r_pca)
+
+for (i in 1:len){
+  for (j in 1:ind){
+    if (r_pca[j,i] > -3.5e-01 & r_pca[j,i] < 3.5e-01){
+      r_pca[j,i] <- 0
+    }
+  }
+}
+
+setwd("C:/Users/julir/OneDrive - Universidad del Norte/++Uninorte/Tesis/+Soledad")
+write.xlsx(r_pca,"LOADINGS_7_PCA_ROTATED_4P_ESTRATOPISO_PROM.xlsx", colnames = TRUE, rowNames = TRUE) #Actualizar
+```
+
+```{r}
+pca_points <- res[[3]][,c(1,2,3,4,5,6,7,8)] #Actualizar
+r_pca_points <- pca_points%*% pca_rotated$rotmat
+colnames(r_pca_points)<- c("RC1","RC2","RC3","RC4","RC5","RC6","RC7","RC8") #Actualizar
+```
+
+
+```{r}
+cod_t <- "Baq"
+```
+
+Hallar k con PAM (docuemnto):
+```{r}
+print(pam_fun_sil(r_pca_points, cod_t, points, name_grafico))
+print(pam_fun_ch(r_pca_points, cod_t, points, name_grafico))
+print(pam_fun_db(r_pca_points, cod_t, points, name_grafico))
+```
+
+
+
+#Exportar solo pca_points
+```{r}
+d <- data.frame(cod_dane, pca_points, r_pca_points)
+setwd("C:/Users/julir/OneDrive - Universidad del Norte/++Uninorte/Tesis/Borradores_PCA")
+write.xlsx(d,"ONLY_PCA_POINTS.xlsx", colnames = TRUE) #Actualizar nombre y ubicacion
+```
+
+
+DBScan:
+```{r}
+set.seed(220)
+minpts<-5 #Actualizar
+#r_pca_points <- datos
+dbscan::kNNdistplot(r_pca_points, k = minpts)
+eps <- round(round(quantile(dbscan::kNNdist(r_pca_points, k = minpts), probs=0.95),2)/5+0.005,2)*5
+sprintf("Se recomienda que eps = %f", eps)
+```
+
+```{r}
+#eps <- 0.3 #Este número lo escojo de acuerdo a la grafica anterior, actualizar siempre
+dbscan <- dbscan(r_pca_points, eps, minpts)
+ncluster <- length(levels(factor(dbscan$cluster)))-1
+sprintf("Se recomienda agrupar la población en %i grupos", ncluster)
+```
+
+
+PAM
+```{r}
+pam <- pam_fun_k(r_pca_points,ncluster, cod_dane, cod_t, points, name_grafico)
+pam[1]
+```
+
+```{r}
+scatterplot3d(as.data.frame(res[[3]][,c(1,2,3)]), cex.symbols = 0.2,
+               xlab = sprintf("PC1 (%0.1f%%)",res[[5]][1]*100),
+               ylab = sprintf("PC2 (%0.1f%%)",res[[5]][2]*100),
+               zlab = sprintf("PC3 (%0.1f%%)",res[[5]][3]*100), color = as.numeric(pam[[2]][,2]), angle = 60)
+```
+
+
+```{r}
+compactness(table %>% dplyr::select(!c(cod_dane, clust)), table$clust)
+```
+
+
+```{r}
+table <- data.frame(pam[[2]], r_pca_points)
+setwd(fold)
+write.xlsx(table, sprintf("Clust %s - %s - %iP - K%i.xlsx", grafico, cod_t, points, ncluster), colnames = TRUE)
+```
+
+
+#Leer table en caso de que sea necesario
+```{r}
+setwd("C:/Users/julir/OneDrive - Universidad del Norte/++Uninorte/Tesis/+Barranquilla")
+table <- read.xlsx("Clust estratopiso y prom sc - Baq - 6P - K16.xlsx") #Actualizar nombre en caso de ser necesario
+points <- length(grep(x = colnames(table), pattern = "_norm"))
+grafico <- "estratopiso_prom_10k_n1500" #Actualizar
+name_grafico <- sprintf("C:/Users/julir/OneDrive - Universidad del Norte/++Uninorte/Tesis/+Barranquilla/Graficos_%s", grafico) #Actualizar
+```
+
+
+Subdividir grupos grandes:
+```{r}
+cod_clust <- "Clust 2"
+subclust <- table[table$clust %in% c(2),] #Actualizar
+sub_points <- subclust %>% dplyr::select(!c(cod_dane, clust))
+
+set.seed(220)
+minpts<-5 #Actualizar
+dbscan::kNNdistplot(sub_points, k = minpts)
+```
+
+```{r}
+eps <- 0.3 #Este número lo escojo de acuerdo a la grafica anterior, actualizar siempre
+sub_dbscan <- dbscan(sub_points, eps, minpts)
+sub_ncluster <- length(levels(factor(sub_dbscan$cluster)))
+sprintf("Se recomienda agrupar la población en %i grupos", sub_ncluster)
+```
+
+
+PAM
+```{r}
+sub_pam <- pam_fun_k(sub_points,sub_ncluster, subclust$cod_dane, cod_clust, points, name_grafico)
+sub_pam[1]
+```
+
+```{r}
+subtable <- data.frame(sub_pam[[2]], sub_points)
+setwd("C:/Users/julir/OneDrive - Universidad del Norte/++Uninorte/Tesis/+Barranquilla")
+write.xlsx(subtable, sprintf("Subclust estratopiso y prom sc - %s - 6P - K%i.xlsx", cod_clust, sub_ncluster), colnames = TRUE)
+```
+
+
