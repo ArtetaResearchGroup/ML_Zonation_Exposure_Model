@@ -36,10 +36,6 @@ if(!require(sf)) install.packages('sf')
 library(sf)
 if(!require(spgwr)) install.packages('spgwr')
 library(spgwr)
-#if(!require(rgdal)) install.packages('rgdal')
-#library(rgdal)
-#if(!require(rgeos)) install.packages('rgeos')
-#library(rgeos)
 if(!require(tmap)) install.packages('tmap')
 library(tmap)
 if(!require(paran)) install.packages('paran')
@@ -52,32 +48,24 @@ if(!require(diceR)) install.packages('diceR')
 library(diceR)
 ```
 
-Conjunto de clases por tipo de BD:
+Defining variable classes:
 ```{r}
-#classes <- c("character","double","double","double","double") #NP_ESTRATO #NP_PISO
-#classes <- c("character","double","double","double","double","double","double") #6P
-#classes <- c("character","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double") #NP_ESTRATOPISO
-#classes <- c("character","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double") #NP_ESTRATOPISO_PROM
-classes <- c("character","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double") #6P_ESTRATOPISO_PROM
-#classes <- c("character","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double") #6P_ESTRATOPISO
-#classes <- c("character","double","double","double","double","double","double","double","double","double","double","double","double","double","double") #6P_ESTRATO_PISO
-
-#classes_4P_ESTRATOVIV_PROM <- c("character","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double")
-#classes_4P_ESTRATOPISO_PROM <- c("character","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double","double")
+classes <- c("character","double","double","double","double","double","double","double","double","double","double","double","double","double","double")
 ```
 
-Lectura de datos:
+Data import:
 ```{r}
-fold <- "C:/Users/julir/OneDrive - Universidad del Norte/++Uninorte/Tesis/++Finales/+Barranquilla"
+fold <- "C:/Users/julir/Documents/Migrado/++Uninorte/Tesis/++Finales/+Barranquilla"
 setwd(fold)
-datos <- read.csv("BD_6P_10K_ESTRATOPISO_PROM.csv",header=TRUE, sep=";", colClasses = classes, na = '#N/A') #Actualizar nombre archivo
+csv <- "BD_6P_10K_ESTRATO_PISO.csv"
+datos <- read.csv(csv,header=TRUE, sep=";", colClasses = classes, na = '#N/A')
 
 cod_dane <- datos$cod_dane
 datos <- datos %>% dplyr::select(!(cod_dane))
 points <- length(grep(x = colnames(datos), pattern = "_norm"))
 
 
-grafico <- "estratopiso_prom_6P_doc" #Actualizar
+grafico <- "estrato_piso_6P_borrador"
 name_grafico <- sprintf("%s/Graficos_%s", fold, grafico)
 
 if (!dir.exists(name_grafico)){
@@ -85,10 +73,12 @@ if (!dir.exists(name_grafico)){
 }else{
   print("dir exists")
 }
+
+cod_t <- "Baq"
 ```
 
 
-Definición de funciones:
+Defining functions:
 ```{r}
 #PCA (grafica y puntos en nuevas dimensiones y %varianza explicada por valores propios)
 fun_pca <- function(datos, name_grafico, nvariables){
@@ -202,39 +192,6 @@ pam_fun_ch <- function(mds_points, com, points, name_grafico) {
   return(list)
 }
 
-#Número de grupos con mejor davies-bouldin con algoritmo PAM
-pam_fun_db <- function(mds_points, com, points, name_grafico) {
-  mds_points <- data.frame(mds_points)
-  set.seed(123)
-  db <- c()
-  for (i in 2:20) {
-    set.seed(123)
-    pam <- pam(mds_points, i) # perform clustering
-    db[i] <- index.DB(mds_points, pam$clustering)$DB
-  }
-  db <-db[2:20]
-  k <- 2:20
-  
-  data <- data.frame(k, db)
-  dbviz<- data %>%
-    tail(10) %>%
-    ggplot( aes(x=k, y=db)) +
-    geom_line(color="dodgerblue1") +
-    geom_point(color="dodgerblue1") +
-    labs(x="Cluster number k", y ="Davies-Bouldin Score",
-         title="Davies-Bouldin Plot") + 
-    geom_vline(xintercept = which(db==min(db)) + 1,linetype="dashed") + 
-    theme_classic()
-  
-  setwd(name_grafico)
-  name_db <- sprintf("DB - %s - %sP.png", com, points)
-  png(name_db)
-  plot(dbviz)
-  dev.off()
-  
-  list <- list(dbviz, data)
-  return(list)
-}
 
 #Número de grupos con mejor Silhouette con algoritmo PAM
 pam_fun_sil<-function(mds_points, com, points, name_grafico){
@@ -252,18 +209,34 @@ pam_fun_sil<-function(mds_points, com, points, name_grafico){
 
 ```
 
+Checking missing values:
+```{r}
+skim(datos)[, c("skim_variable", "n_missing")]
+```
+
+Data Imputation using Random Forest (If necessary):
+```{r}
+miss <- fun_missing(datos)
+print(miss[1])
+datos<- data.frame(miss[2])
+```
+
+
+Dimensionality reduction:
 ```{r}
 datos_f<-datos
 nvariables <- ncol(datos)
 res<-fun_pca(datos_f, name_grafico,nvariables)
-res[[2]]
-res[[5]]
+res[[2]] #PC1 and PC2 plot
+res[[5]] #Explained variance per principal component
 ```
 
+Horn's Parallel Analysis:
 ```{r}
 paran(datos_f, iterations = 5000, centile = 95)
 ```
 
+PC1, PC2 and PC3 plot:
 ```{r}
 scatterplot3d(as.data.frame(res[[3]][,c(1,2,3)]), cex.symbols = 0.2,
               xlab = sprintf("PC1 (%0.1f%%)",res[[5]][1]*100),
@@ -272,19 +245,7 @@ scatterplot3d(as.data.frame(res[[3]][,c(1,2,3)]), cex.symbols = 0.2,
 
 ```
 
-```{r}
-plot(as.data.frame(res[[3]][,c(1,2)]),
-     cex = 0.2, 
-     ylab = sprintf("PC2 (%0.1f%%)",res[[5]][2]*100),
-     xlab = sprintf("PC1 (%0.1f%%)",res[[5]][1]*100))
-```
-
-
-```{r}
-explor(res_pca)
-```
-
-
+Loadings matrix extraction:
 ```{r}
 loadings <- data.frame(res[[4]])
 len <- ncol(loadings)
@@ -297,19 +258,14 @@ for (i in 1:len){
     }
   }
 }
-
-setwd("C:/Users/julir/OneDrive - Universidad del Norte/++Uninorte/Tesis/Borradores_PCA")
-write.xlsx(loadings,"LOADINGS_PCA_6P_PISO_VIV_PARED.xlsx", colnames = TRUE, rowNames = TRUE)
-```
-
-```{r}
-pca_rotated<-varimax(res[[4]][,c(1,2,3,4,5,6,7,8)]) #El numero de PC las elijo de acuerdo a la grafica de varianza explicada por cada PC
-print(pca_rotated)
 ```
 
 
+Computation of rotated principal components (the number of PCs is chosen according to the explained variance and Horn’s parallel analysis): 
 ```{r}
-r_pca<- data.frame(pca_rotated$loadings[,c(1,2,3,4,5,6,7)]) #Actualizar por el mismo numero de arriba
+pca_rotated<-varimax(res[[4]][,c(1,2,3,4,5)])
+
+r_pca<- data.frame(pca_rotated$loadings[,c(1,2,3,4,5)])
 len <- ncol(r_pca)
 ind <- nrow(r_pca)
 
@@ -321,62 +277,42 @@ for (i in 1:len){
   }
 }
 
-setwd("C:/Users/julir/OneDrive - Universidad del Norte/++Uninorte/Tesis/+Soledad")
-write.xlsx(r_pca,"LOADINGS_7_PCA_ROTATED_4P_ESTRATOPISO_PROM.xlsx", colnames = TRUE, rowNames = TRUE) #Actualizar
-```
-
-```{r}
-pca_points <- res[[3]][,c(1,2,3,4,5,6,7,8)] #Actualizar
+pca_points <- res[[3]][,c(1,2,3,4,5)]
 r_pca_points <- pca_points%*% pca_rotated$rotmat
-colnames(r_pca_points)<- c("RC1","RC2","RC3","RC4","RC5","RC6","RC7","RC8") #Actualizar
+colnames(r_pca_points)<- c("RC1","RC2","RC3","RC4","RC5")
 ```
 
 
-```{r}
-cod_t <- "Baq"
-```
-
-Hallar k con PAM (docuemnto):
+Computing the number of clusters (K) with PAM for comparative purposes:
 ```{r}
 print(pam_fun_sil(r_pca_points, cod_t, points, name_grafico))
 print(pam_fun_ch(r_pca_points, cod_t, points, name_grafico))
-print(pam_fun_db(r_pca_points, cod_t, points, name_grafico))
 ```
 
 
-
-#Exportar solo pca_points
-```{r}
-d <- data.frame(cod_dane, pca_points, r_pca_points)
-setwd("C:/Users/julir/OneDrive - Universidad del Norte/++Uninorte/Tesis/Borradores_PCA")
-write.xlsx(d,"ONLY_PCA_POINTS.xlsx", colnames = TRUE) #Actualizar nombre y ubicacion
-```
-
-
-DBScan:
+Computing the number of clusters (K) with DBSCAN:
 ```{r}
 set.seed(220)
-minpts<-5 #Actualizar
-#r_pca_points <- datos
+minpts<-5
 dbscan::kNNdistplot(r_pca_points, k = minpts)
 eps <- round(round(quantile(dbscan::kNNdist(r_pca_points, k = minpts), probs=0.95),2)/5+0.005,2)*5
-sprintf("Se recomienda que eps = %f", eps)
+sprintf("Optimal eps = %f", eps)
 ```
 
 ```{r}
-#eps <- 0.3 #Este número lo escojo de acuerdo a la grafica anterior, actualizar siempre
 dbscan <- dbscan(r_pca_points, eps, minpts)
 ncluster <- length(levels(factor(dbscan$cluster)))-1
-sprintf("Se recomienda agrupar la población en %i grupos", ncluster)
+sprintf(" %i clusters identified", ncluster)
 ```
 
 
-PAM
+Assignation process using PAM:
 ```{r}
 pam <- pam_fun_k(r_pca_points,ncluster, cod_dane, cod_t, points, name_grafico)
 pam[1]
 ```
 
+3D Clusters plot:
 ```{r}
 scatterplot3d(as.data.frame(res[[3]][,c(1,2,3)]), cex.symbols = 0.2,
                xlab = sprintf("PC1 (%0.1f%%)",res[[5]][1]*100),
@@ -384,58 +320,10 @@ scatterplot3d(as.data.frame(res[[3]][,c(1,2,3)]), cex.symbols = 0.2,
                zlab = sprintf("PC3 (%0.1f%%)",res[[5]][3]*100), color = as.numeric(pam[[2]][,2]), angle = 60)
 ```
 
-
-```{r}
-compactness(table %>% dplyr::select(!c(cod_dane, clust)), table$clust)
-```
-
-
+Exporting results:
 ```{r}
 table <- data.frame(pam[[2]], r_pca_points)
 setwd(fold)
 write.xlsx(table, sprintf("Clust %s - %s - %iP - K%i.xlsx", grafico, cod_t, points, ncluster), colnames = TRUE)
 ```
-
-
-#Leer table en caso de que sea necesario
-```{r}
-setwd("C:/Users/julir/OneDrive - Universidad del Norte/++Uninorte/Tesis/+Barranquilla")
-table <- read.xlsx("Clust estratopiso y prom sc - Baq - 6P - K16.xlsx") #Actualizar nombre en caso de ser necesario
-points <- length(grep(x = colnames(table), pattern = "_norm"))
-grafico <- "estratopiso_prom_10k_n1500" #Actualizar
-name_grafico <- sprintf("C:/Users/julir/OneDrive - Universidad del Norte/++Uninorte/Tesis/+Barranquilla/Graficos_%s", grafico) #Actualizar
-```
-
-
-Subdividir grupos grandes:
-```{r}
-cod_clust <- "Clust 2"
-subclust <- table[table$clust %in% c(2),] #Actualizar
-sub_points <- subclust %>% dplyr::select(!c(cod_dane, clust))
-
-set.seed(220)
-minpts<-5 #Actualizar
-dbscan::kNNdistplot(sub_points, k = minpts)
-```
-
-```{r}
-eps <- 0.3 #Este número lo escojo de acuerdo a la grafica anterior, actualizar siempre
-sub_dbscan <- dbscan(sub_points, eps, minpts)
-sub_ncluster <- length(levels(factor(sub_dbscan$cluster)))
-sprintf("Se recomienda agrupar la población en %i grupos", sub_ncluster)
-```
-
-
-PAM
-```{r}
-sub_pam <- pam_fun_k(sub_points,sub_ncluster, subclust$cod_dane, cod_clust, points, name_grafico)
-sub_pam[1]
-```
-
-```{r}
-subtable <- data.frame(sub_pam[[2]], sub_points)
-setwd("C:/Users/julir/OneDrive - Universidad del Norte/++Uninorte/Tesis/+Barranquilla")
-write.xlsx(subtable, sprintf("Subclust estratopiso y prom sc - %s - 6P - K%i.xlsx", cod_clust, sub_ncluster), colnames = TRUE)
-```
-
 
